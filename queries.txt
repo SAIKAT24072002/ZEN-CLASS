@@ -1,0 +1,205 @@
+Design database for Zen class programme.
+Below are the MongoDB queries for the tasks:
+
+================================================================================
+1. Find all the topics and tasks which are thought in the month of October:
+================================================================================
+
+// To get all topics taught in October 2020:
+db.topics.find({
+  taughtDate: {
+    $gte: ISODate("2020-10-01T00:00:00Z"),
+    $lt: ISODate("2020-11-01T00:00:00Z")
+  }
+});
+
+// To get all tasks assigned in October 2020:
+db.tasks.find({
+  assignedDate: {
+    $gte: ISODate("2020-10-01T00:00:00Z"),
+    $lt: ISODate("2020-11-01T00:00:00Z")
+  }
+});
+
+
+================================================================================
+2. Find all the company drives which appeared between 15 oct-2020 and 31-oct-2020:
+================================================================================
+
+db.company_drives.find({
+  driveDate: {
+    $gte: ISODate("2020-10-15T00:00:00Z"),
+    $lte: ISODate("2020-10-31T23:59:59Z")
+  }
+});
+
+
+================================================================================
+3. Find all the company drives and students who are appeared for the placement:
+================================================================================
+
+db.company_drives.aggregate([
+  {
+    $lookup: {
+      from: "users",
+      localField: "appearedStudents",
+      foreignField: "_id",
+      as: "appearedStudentsDetails"
+    }
+  },
+  {
+    $project: {
+      companyName: 1,
+      driveDate: 1,
+      "appearedStudentsDetails.name": 1,
+      "appearedStudentsDetails.email": 1
+    }
+  }
+]);
+
+
+================================================================================
+4. Find the number of problems solved by the user in codekata:
+================================================================================
+
+// To find the count for all users:
+db.codekata.aggregate([
+  {
+    $lookup: {
+      from: "users",
+      localField: "user",
+      foreignField: "_id",
+      as: "userDetails"
+    }
+  },
+  { $unwind: "$userDetails" },
+  {
+    $project: {
+      _id: 0,
+      userName: "$userDetails.name",
+      problemsSolved: 1
+    }
+  }
+]);
+
+
+================================================================================
+5. Find all the mentors with who has the mentee's count more than 15:
+================================================================================
+
+db.users.aggregate([
+  {
+    $group: {
+      _id: "$mentor",
+      menteeCount: { $sum: 1 }
+    }
+  },
+  {
+    $match: {
+      _id: { $ne: null },
+      menteeCount: { $gt: 15 }
+    }
+  },
+  {
+    $lookup: {
+      from: "mentors",
+      localField: "_id",
+      foreignField: "_id",
+      as: "mentorDetails"
+    }
+  },
+  { $unwind: "$mentorDetails" },
+  {
+    $project: {
+      _id: 0,
+      mentorName: "$mentorDetails.name",
+      mentorEmail: "$mentorDetails.email",
+      menteeCount: 1
+    }
+  }
+]);
+
+
+================================================================================
+6. Find the number of users who are absent and task is not submitted between 15 oct-2020 and 31-oct-2020:
+================================================================================
+
+db.attendance.aggregate([
+  // 1. Get absent records within the date range
+  {
+    $match: {
+      date: {
+        $gte: ISODate("2020-10-15T00:00:00Z"),
+        $lte: ISODate("2020-10-31T23:59:59Z")
+      },
+      status: "absent"
+    }
+  },
+  // 2. Group by user to get unique users who were absent
+  {
+    $group: {
+      _id: "$user"
+    }
+  },
+  // 3. Fetch all tasks assigned in that same date range
+  {
+    $lookup: {
+      from: "tasks",
+      pipeline: [
+        {
+          $match: {
+            assignedDate: {
+              $gte: ISODate("2020-10-15T00:00:00Z"),
+              $lte: ISODate("2020-10-31T23:59:59Z")
+            }
+          }
+        }
+      ],
+      as: "periodTasks"
+    }
+  },
+  // 4. Filter out tasks that were submitted by the user
+  {
+    $project: {
+      userId: "$_id",
+      unsubmittedTasks: {
+        $filter: {
+          input: "$periodTasks",
+          as: "task",
+          cond: {
+            $not: {
+              $in: [
+                "$_id", 
+                { $ifNull: ["$$task.submittedUsers", []] }
+              ]
+            }
+          }
+        }
+      }
+    }
+  },
+  // 5. Keep only users who have at least one unsubmitted task
+  {
+    $match: {
+      $expr: { $gt: [{ $size: "$unsubmittedTasks" }, 0] }
+    }
+  },
+  // 6. Look up the user's name and details
+  {
+    $lookup: {
+      from: "users",
+      localField: "userId",
+      foreignField: "_id",
+      as: "userDetails"
+    }
+  },
+  { $unwind: "$userDetails" },
+  {
+    $project: {
+      _id: 0,
+      userName: "$userDetails.name",
+      userEmail: "$userDetails.email",
+      unsubmittedTaskCount: { $size: "$unsubmittedTasks" }
+    }
+  }
+]);
